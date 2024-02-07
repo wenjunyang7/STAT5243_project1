@@ -7,10 +7,10 @@ The project discussed the cause of parent happiness and eliminated the influence
 # Dictionary Structrue
 ```bash
 STAT5243_project1
-├── doc/
-├── data/
-├── fig/
-├── output/
+├── doc/        #R notebook
+├── data/       #Data imported in the project
+├── fig/        #Image file generated in the project
+├── output/     #Result of the prject 
 └── readme.md
 
 ```
