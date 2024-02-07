@@ -1,0 +1,269 @@
+---
+title: 'Project 1: Happiness of Parents'
+author: "Wenjun Yang"
+date: "2024-02-05"
+output:
+  html_document:
+    df_print: paged
+---
+The project discussed the cause of parent happiness and eliminated the influence of age. I used two table, "hm_data" and "demographic". The first table, "hm_data", records the text of happy moment from workers. The second table are information of these works.
+
+# 1.Data wrangling
+
+Data wrangling aims to covert raw data about text and workers into a desired format.
+
+## Load all the required libraries
+
+```{r}
+library(tm)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(wordcloud)
+```
+
+## Load the data to be cleaned and processed
+
+```{r}
+
+urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/cleaned_hm.csv'
+urlfile2<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/demographic.csv'
+hm_data <- read_csv(urlfile)
+worker_data<- read_csv(urlfile2)
+doc <- merge(hm_data, worker_data, by = "wid", all.x = TRUE)
+```
+
+The data collected text from 100 countries.The pie chart indicates that there is a huge part of workers from USA. Since the distribution of country is uneven, the initial data cannot embody the worldwide workers. The data is more suitable to discuss happiness moments in USA. Thus, we would remove the data outside USA.
+
+```{r}
+png(file = "./fig/countries.jpg")
+country <- data.frame(table(doc$country))
+pie(country$Freq,country$Var1)
+dev.off()
+pie(country$Freq,country$Var1)
+doc <- doc[doc$country == "USA",]
+```
+
+## Cleaning of the text
+
+I build a corpus to remove special characters, numbers or punctuation from the text.
+
+```{r}
+corpus <- VCorpus(VectorSource(doc$cleaned_hm))%>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(removeWords, character(0))%>%
+  tm_map(stripWhitespace)
+```
+
+```{r}
+stemmed <- tm_map(corpus, stemDocument) %>%
+  tidy() %>%
+  select(text)
+```
+
+```{r}
+dict <- tidy(corpus) %>%
+  select(text) %>%
+  unnest_tokens(dictionary, text)
+```
+
+## Removing stop words
+Stop words are commonly used words like "are" and "is". Since the topic of text is related to happiness, "happy","happier", "happiest", and "happiness" are commonly used words. Since experiments are reflection on past 24 hours, some words related to time are not cause of happiness. I removed these words in order to extract interesting information. 
+
+```{r}
+data("stop_words")
+
+word <- c("happy","ago","yesterday","lot","today","months","month","last","week","past","happier","happiest","day","time","watched","watching","received","finally","happiness","found")
+
+stop_words <- stop_words %>%
+  bind_rows(mutate(tibble(word), lexicon = "updated"))
+```
+
+## Combining stems and dictionary into the same tibble
+
+```{r}
+completed <- stemmed %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(stems, text) %>%
+  bind_cols(dict) %>%
+  anti_join(stop_words, by = c("dictionary" = "word"))
+```
+
+```{r}
+completed <- completed %>%
+  group_by(stems) %>%
+  count(dictionary) %>%
+  mutate(word = dictionary[which.max(n)]) %>%
+  ungroup() %>%
+  select(stems, word) %>%
+  distinct() %>%
+  right_join(completed,) %>%
+  select(-stems)
+```
+
+```{r}
+completed <- completed %>%
+  group_by(id) %>%
+  summarise(text = str_c(word, collapse = " ")) %>%
+  ungroup()
+```
+
+## Keeping a track of the happy moments with their own ID
+
+```{r}
+doc <- doc %>%
+  mutate(id = row_number()) %>%
+  inner_join(completed)
+
+```
+
+## Exporting data into csv
+
+```{r}
+write_csv(doc, "./output/processed_moments.csv")
+```
+
+# 2.Analysis of text
+
+## Question 1: What differences of happy moment between parents and childless people in USA?
+
+Now we can divide the table into parent and childless individuals. Parenthood has 29807 observations. Childless has 49539 observations. Both data are large enough to find patterns. 
+
+```{r}
+parent <- doc[doc$parenthood == "y",]
+nparent <- doc[doc$parenthood == "n",]
+```
+
+I created word clouds for two group of workers. Word cloud could identify key words with high frequency in their happy moment. Word cloud is necessary for this project to figure out differences between two group of people.
+
+```{r}
+#parent
+set.seed(1234)
+dtm <- TermDocumentMatrix(parent$text) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words)
+wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words=30, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+```
+
+```{r}
+#parent
+set.seed(1234)
+dtm <- TermDocumentMatrix(nparent$text) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words)
+png(file = "./fig/parent_wordcloud.jpg")
+wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words=29, random.order=FALSE, rot.per=0.35,colors=brewer.pal(8, "Dark2"))
+dev.off()
+
+
+wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words=29, random.order=FALSE, rot.per=0.35,colors=brewer.pal(8, "Dark2"))
+```
+
+The word cloud of parenthood shows that family and family members occupies a large part of happy moment. Most of happy moment happened at night. In the word cloud of childless people, I can find that friend, game, pet, and couple are the cause of happiness. Both word clouds have" friend", but family members are great differences.
+
+
+## Question 2: What factor cause the happy connection with family? Age or parenthood?
+
+Ignoring "son" and "daughter", I can find that parents' happy experiences are mainly about family and home. The cause of childless people are various. Intuitively, the average age of parents would be greater than childless people. The word clouds above would not prove that the parenthood is a factor affecting the trend of happiness. My next step is to clear what strengthen happy connection with family. 
+
+The bar chart of age shows that the distribution is right skewed and most of people's age clusters from 20 to 40.
+
+```{r}
+# the age of workers
+png(file = "./fig/age_usa.jpg")
+age <- table(doc$age)
+barplot(age,main = "Age of workers in USA",xlab = "Age", ylab = "Count")
+dev.off()
+
+barplot(age,main = "Age of workers in USA",xlab = "Age", ylab = "Count")
+```
+
+Then I would focus on age over 30 to explore the differences between parent and childless individual. The size of data is large enough to find patterns.
+
+```{r}
+old <- doc[doc$age>=30,]
+old_parent <- old[old$parenthood == "y",]
+old_nparent <- old[old$parenthood == "n",]
+```
+
+```{r}
+#old_parent
+dtm <- TermDocumentMatrix(old_parent$text) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words)
+wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words=30, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+```
+
+```{r}
+#old_nparent
+dtm <- TermDocumentMatrix(old_nparent$text) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words)
+wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words=30, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+```
+
+Comparing two word clouds above, I discover that family and home are less strong trend of childless group than the parent group. This indicates that kids would cause improvement in happiness of family regardless to age.
+
+
+## Question 3: What cause the happy moment of father and mother separetely?
+
+Based on the first two questions, family members are main trend of happiness. This question would separately discuss happy moments of father and mother. 
+
+```{r}
+father <- parent[parent$gender=="m",]
+mother <- parent[parent$gender == "f",]
+```
+
+```{r}
+#father
+set.seed(1234)
+dtm <- TermDocumentMatrix(father$text) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df_f <- data.frame(word = names(words),freq=words)
+dff_order <- df_f[order(df_f$freq, decreasing = TRUE), ]
+dff_order <- dff_order[1:20,c('word', 'freq')]
+png(file = "./fig/father_wordcloud.jpg")
+wordcloud(words = df_f$word, freq = df_f$freq, min.freq = 1, max.words=30, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+dev.off()
+
+png(file = "./fig/father_bar.jpg")
+barplot(dff_order$freq,names.arg=dff_order$word,main = "Top 20 words of father happy moment",xlab = "Words", ylab = "Count",las=2, cex.names=.7,col=brewer.pal(8, "Dark2"))
+dev.off()
+
+wordcloud(words = df_f$word, freq = df_f$freq, min.freq = 1, max.words=30, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+
+barplot(dff_order$freq,names.arg=dff_order$word,main = "Top 20 words of father happy moment",xlab = "Words", ylab = "Count",las=2, cex.names=.7,col=brewer.pal(8, "Dark2"))
+```
+
+The word cloud looks similar to the word cloud of parenthood. However, the happy moments with wife are more than with kids. Playing games is second key word of happy moment and dinner is third key word of happy moment.  
+
+```{r}
+#mother
+set.seed(1234)
+dtm <- TermDocumentMatrix(mother$text) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df_m <- data.frame(word = names(words),freq=words)
+dfm_order <- df_m[order(df_m$freq, decreasing = TRUE), ]
+dfm_order <- dfm_order[1:20,c('word', 'freq')]
+png(file = "./fig/mother_wrodcloud.jpg")
+wordcloud(words = df_m$word, freq = df_m$freq, min.freq = 1, max.words=30, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+dev.off()
+
+png((file = "./fig/mother_bar.jpg"))
+barplot(dfm_order$freq,names.arg=dfm_order$word,main = "Top 20 words of father happy moment",xlab = "Words", ylab = "Count",las=2, cex.names=.7,col=brewer.pal(8, "Dark2"))
+dev.off()
+
+barplot(dfm_order$freq,names.arg=dfm_order$word,main = "Top 20 words of father happy moment",xlab = "Words", ylab = "Count",las=2, cex.names=.7,col=brewer.pal(8, "Dark2"))
+wordcloud(words = df_m$word, freq = df_m$freq, min.freq = 1, max.words=30, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))
+
+```
+
+The bar chart shows that daughter, son, and husband have similar frequency in mother's happy moment. Dinner is the second key topic of mother's happiness and school is the third key topic of mother's happiness. I think "school" means kids performance in the school. 
